@@ -1,0 +1,24 @@
+# Python stuff
+__pycache__/
+*.py[cod]
+*.egg-info
+
+# OS
+.DS_Store
+
+# Logs or local data
+*.log
+*.csv
+*.json
+
+# Docker
+docker-compose.override.yml
+
+# Secrets or env files
+.env
+
+# Virtual environment
+venv/
+
+# Airflow
+airflow/logs/

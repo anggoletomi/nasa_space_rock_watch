@@ -1,0 +1,115 @@
+services:
+  postgres:
+    image: postgres:15.2
+    container_name: spacerockwatch_postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - hadoop
+
+  namenode:
+    build:
+      context: .
+      dockerfile: docker/hadoop/Dockerfile
+    image: spacerockwatch_hadoop:3.4.1
+    container_name: spacerockwatch_namenode
+    hostname: namenode
+    networks:
+      - hadoop
+    volumes:
+      - hdfs_namenode_data:/opt/hadoop/hdfs/namenode
+    command: >
+      bash -c "echo 'Starting SSH daemon...' &&
+               /usr/sbin/sshd &&
+               echo 'Formatting HDFS...' &&
+               bin/hdfs namenode -format &&
+               echo 'Starting DFS...' &&
+               sbin/start-dfs.sh &&
+               tail -f /dev/null"
+    ports:
+      - "9871:9870"
+      - "9000:$9000"
+
+  datanode:
+    build:
+      context: .
+      dockerfile: docker/hadoop/Dockerfile
+    image: spacerockwatch_hadoop:3.4.1
+    container_name: spacerockwatch_datanode
+    hostname: datanode
+    depends_on:
+      - namenode
+    networks:
+      - hadoop
+    volumes:
+      - hdfs_datanode_data:/opt/hadoop/hdfs/datanode
+    command: >
+      bash -c "echo 'Starting SSH daemon...' &&
+               /usr/sbin/sshd &&
+               echo 'Starting DFS...' &&
+               sbin/start-dfs.sh &&
+               tail -f /dev/null"
+
+  hive:
+    image: apache/hive:4.0.1
+    container_name: spacerockwatch_hive
+    environment:
+      SERVICE_NAME: hiveserver2
+    ports:
+      - "10000:10000" # JDBC (Beeline)
+      - "10002:10002" # HS2 Web UI
+    depends_on:
+      - namenode
+      - datanode
+    networks:
+      - hadoop
+
+  airflow:
+    image: apache/airflow:2.6.2
+    container_name: spacerockwatch_airflow
+    depends_on:
+      - postgres
+      - hive
+      - namenode
+      - datanode
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__FERNET_KEY=${AIRFLOW_FERNET_KEY}
+      - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=False
+      - AIRFLOW__WEBSERVER__ENABLE_XFRAME_CREDENTIALS=False
+      - NASA_API_KEY=${NASA_API_KEY}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_HOST=${POSTGRES_HOST}
+      - POSTGRES_PORT=5432
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+    ports:
+      - "8080:8080"
+    command: >
+      bash -c "
+      airflow db init &&
+      airflow users create --username ${AIRFLOW_USERNAME} --password ${AIRFLOW_PASSWORD} --firstname Admin --lastname User --role Admin --email admin@example.com &&
+      airflow webserver &
+      airflow scheduler
+      "
+    networks:
+      - hadoop
+
+volumes:
+  postgres_data:
+  hdfs_namenode_data:
+  hdfs_datanode_data:
+
+networks:
+  hadoop:
+    driver: bridge
